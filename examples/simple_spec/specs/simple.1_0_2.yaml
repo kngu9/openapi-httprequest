@@ -1,0 +1,22 @@
+# Changes:
+# - Added field is_fatal to message
+
+openapi: "3.0.0"
+info:
+  version: 1.0.2
+paths:
+components:
+  schemas:
+    Error:
+      required:
+        - code
+        - message
+        - is_fatal
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        is_fatal:
+          type: bool

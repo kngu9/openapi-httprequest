@@ -11,6 +11,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/iancoleman/strcase"
 	"github.com/juju/gnuflag"
+	"github.com/mhemmings/openapi-httprequest/meta"
 	oas "github.com/mhemmings/openapi-httprequest/openapi"
 	"github.com/mhemmings/openapi-httprequest/templates"
 )
@@ -40,8 +41,20 @@ func main() {
 	if gnuflag.NArg() != 1 || gnuflag.Arg(0) == "help" {
 		gnuflag.Usage()
 	}
-
 	uri := gnuflag.Arg(0)
+
+	m, err := meta.New(meta.Config{
+		SpecFolder: uri,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer m.Close()
+
+	if err := m.GenerateSpec(); err != nil {
+		log.Fatal(err)
+	}
+	return
 
 	swagger, err := oas.Load(uri)
 	if err != nil {
