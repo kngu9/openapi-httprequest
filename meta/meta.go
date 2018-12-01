@@ -102,6 +102,8 @@ func (m *Meta) GenerateSpec() error {
 		})
 
 		prev := group[0]
+		prev.Base()
+
 		for i := 1; i < len(group); i++ {
 			temp, err := group[i].MigrateFrom(*prev)
 			if err != nil {

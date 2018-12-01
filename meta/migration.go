@@ -28,9 +28,13 @@ func (c *migrationConfig) validate() error {
 
 // Migration represents a single migration for a group
 type Migration struct {
-	*migrationConfig `yaml:",omitempty"`
+	*migrationConfig
+	buff []byte
 
-	swag      *openapi3.Swagger
+	loader *openapi3.SwaggerLoader
+	swag   *openapi3.Swagger
+
+	pathVer   map[string]*semver.Version
 	schemaVer map[string]*semver.Version
 }
 
@@ -44,40 +48,84 @@ func newMigration(cfg *migrationConfig) (*Migration, error) {
 		return nil, fmt.Errorf("unable to read file: %s", err.Error())
 	}
 
-	loader := openapi3.NewSwaggerLoader()
-	swag, err := loader.LoadSwaggerFromYAMLData(buff)
+	return &Migration{
+		migrationConfig: cfg,
+		buff:            buff,
+		loader:          openapi3.NewSwaggerLoader(),
+		// swag:            swag,
+		// schemaVer:       schemaVer,
+	}, nil
+}
+
+// Base is called to load the initial schema
+func (m *Migration) Base() error {
+	swag, err := m.loader.LoadSwaggerFromYAMLData(m.buff)
 	if err != nil {
-		return nil, fmt.Errorf("unable to load file into swagger format: %s", err.Error())
+		return fmt.Errorf("unable to load file into swagger format: %s", err.Error())
 	}
+	m.swag = swag
 
 	ver, err := semver.Make(swag.Info.Version)
 	if err != nil {
-		return nil, fmt.Errorf("invalid semver %s: %s", swag.Info.Version, err.Error())
+		return fmt.Errorf("invalid semver %s: %s", swag.Info.Version, err.Error())
 	}
-	if cfg.Version.Compare(ver) != 0 {
-		return nil, fmt.Errorf("version mismatch, version of file: %s, version of spec: %s", cfg.Version.String(), ver.String())
+	if m.Version.Compare(ver) != 0 {
+		return fmt.Errorf("version mismatch, version of file: %s, version of spec: %s", m.Version.String(), ver.String())
 	}
 
 	schemaVer := make(map[string]*semver.Version)
 	for k := range swag.Components.Schemas {
 		schemaVer[k] = &ver
 	}
+	m.schemaVer = schemaVer
 
-	return &Migration{
-		migrationConfig: cfg,
-		swag:            swag,
-		schemaVer:       schemaVer,
-	}, nil
+	pathVer := make(map[string]*semver.Version)
+	for k := range swag.Paths {
+		pathVer[k] = &ver
+	}
+	m.pathVer = pathVer
+
+	return nil
 }
 
 // MigrateFrom incrementally migrates the schema
 func (m *Migration) MigrateFrom(prev Migration) (*Migration, error) {
-	for k, v := range m.swag.Components.Schemas {
-		prev.schemaVer[k] = m.Version
-		prev.swag.Components.Schemas[k] = v
+	if err := m.loader.ResolveRefsIn(prev.swag); err != nil {
+		return nil, fmt.Errorf("unable to resolve refs: %s", err.Error())
 	}
 
-	return &prev, nil
+	swag, err := m.loader.LoadSwaggerFromYAMLData(m.buff)
+	if err != nil {
+		return nil, fmt.Errorf("unable to load swagger data: %s", err.Error())
+	}
+
+	schemaVer := make(map[string]*semver.Version)
+	for k := range swag.Components.Schemas {
+		schemaVer[k] = m.Version
+	}
+	m.schemaVer = schemaVer
+
+	pathVer := make(map[string]*semver.Version)
+	for k := range swag.Paths {
+		pathVer[k] = m.Version
+	}
+	m.pathVer = pathVer
+
+	for k, v := range swag.Components.Schemas {
+		m.schemaVer[k] = m.Version
+		swag.Components.Schemas[k] = v
+	}
+
+	for k, v := range swag.Paths {
+		m.pathVer[k] = m.Version
+		swag.Paths[k] = v
+	}
+
+	return &Migration{
+		migrationConfig: m.migrationConfig,
+		swag:            swag,
+		loader:          m.loader,
+	}, nil
 }
 
 // Close terminates all resources
